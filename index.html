@@ -125,6 +125,10 @@
         <button class="btn-secondary" id="logoutBtn">تسجيل الخروج</button>
       </div>
       <div class="balance" id="balanceResult"></div>
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:20px 0;">
+<p class="sub" style="margin-bottom:10px;">جرّب تحويل صوت إلى نص:</p>
+<button class="btn-primary" id="recordBtn">🎤 ابدأ التسجيل</button>
+<div id="genResult" style="margin-top:14px;"></div>
     </div>
 
     <div id="statusBox" class="status" role="status" aria-live="polite"></div>
@@ -207,7 +211,59 @@ async function checkBalance() {
     $("balanceResult").textContent = "تعذّر جلب الرصيد: " + err.message;
   }
 }
+let mediaRecorder, audioChunks = [], isRecording = false;
 
+async function toggleRecording() {
+  const key = localStorage.getItem("pollinations_api_key");
+  const btn = $("recordBtn");
+  const resultBox = $("genResult");
+
+  if (!isRecording) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+        resultBox.textContent = "جارِ تحويل الصوت إلى نص...";
+
+        const formData = new FormData();
+        formData.append("file", audioBlob, "recording.webm");
+        formData.append("model", "whisper-1");
+
+        try {
+          const res = await fetch("https://gen.pollinations.ai/v1/audio/transcriptions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}` },
+            body: formData,
+          });
+          if (!res.ok) {
+            let detail = "";
+            try { detail = JSON.stringify(await res.json()); }
+            catch { detail = await res.text(); }
+            throw new Error(`HTTP ${res.status} — ${detail}`);
+          }
+          const data = await res.json();
+          resultBox.textContent = data.text || JSON.stringify(data);
+        } catch (err) {
+          resultBox.textContent = "تعذّر تحويل الصوت: " + err.message;
+        }
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      btn.textContent = "⏹ إيقاف التسجيل";
+    } catch (err) {
+      resultBox.textContent = "تعذّر الوصول للميكروفون: " + err.message;
+    }
+  } else {
+    mediaRecorder.stop();
+    isRecording = false;
+    btn.textContent = "🎤 ابدأ التسجيل";
+  }
+  }
+  
 function handleRedirectCallback() {
   if (!window.location.hash) return;
   const frag = new URLSearchParams(window.location.hash.slice(1));
@@ -251,7 +307,7 @@ function render() {
 $("loginBtn").addEventListener("click", startLogin);
 $("logoutBtn").addEventListener("click", logout);
 $("balanceBtn").addEventListener("click", checkBalance);
-
+$("recordBtn").addEventListener("click", toggleRecording);
 handleRedirectCallback();
 render();
 </script>
